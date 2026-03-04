@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>✋ GestureCanvas by Aaryansh — Draw with Your Hand</title>
+<style>
+  /* ── Google Fonts ── */
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@300;400;500&display=swap');
+
+  :root {
+    --pink-bg: #fce4ec;
+    --pink-mid: #f8bbd0;
+    --pink-deep: #e91e8c;
+    --glass-bg: rgba(255,255,255,0.18);
+    --glass-border: rgba(255,255,255,0.45);
+    --shadow: 0 8px 32px rgba(233,30,140,0.13);
+    --text: #2d1a26;
+    --accent: #e91e8c;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--pink-bg);
+    font-family: 'Syne', sans-serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ── Webcam sits behind everything ── */
+  #webcam {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0.18;
+    transform: scaleX(-1); /* mirror */
+    z-index: 0;
+  }
+
+  /* ── Main canvas: landmarks + drawing ── */
+  #overlayCanvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+    cursor: none;
+  }
+
+  /* ── Top bar ── */
+  #topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  #topbar .brand {
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--accent);
+  }
+  #topbar .brand span { color: var(--text); }
+
+  #modeDisplay {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 6px 18px;
+    border-radius: 50px;
+    background: var(--glass-bg);
+    border: 1.5px solid var(--glass-border);
+    color: var(--text);
+    letter-spacing: 1.5px;
+    transition: all 0.25s ease;
+  }
+  #modeDisplay.draw  { background: rgba(233,30,140,0.15); border-color: var(--accent); color: var(--accent); }
+  #modeDisplay.erase { background: rgba(255,80,0,0.15); border-color: #ff5000; color: #ff5000; }
+  #modeDisplay.stop  { background: rgba(100,100,100,0.1); border-color: #aaa; color: #888; }
+
+  #colorDisplay {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text);
+    letter-spacing: 1px;
+  }
+  #colorSwatch {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 2.5px solid rgba(255,255,255,0.7);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: background 0.3s ease;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 8px 20px;
+    border-radius: 50px;
+    border: 1.5px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(233,30,140,0.3);
+  }
+  .btn-group { display: flex; gap: 8px; }
+
+  /* ── Info Panel (right side) ── */
+  #infoPanel {
+    position: fixed;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    width: 210px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border: 1.5px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 20px 18px;
+    box-shadow: var(--shadow);
+    color: var(--text);
+  }
+
+  #infoPanel h3 {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+
+  .guide-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 11px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    font-family: 'DM Mono', monospace;
+  }
+  .guide-item .icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .guide-item .desc { color: #5a3a50; }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--pink-mid), transparent);
+    margin: 14px 0;
+  }
+
+  /* ── Thickness slider panel ── */
+  #thicknessWrap {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1.5px solid var(--glass-border);
+    border-radius: 50px;
+    padding: 10px 22px;
+    box-shadow: var(--shadow);
+  }
+  #thicknessLabel {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    color: #a06080;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  #thicknessSlider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 160px;
+    height: 4px;
+    border-radius: 4px;
+    background: linear-gradient(to right, var(--accent) 0%, var(--pink-mid) 100%);
+    outline: none;
+    cursor: pointer;
+  }
+  #thicknessSlider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2.5px solid #fff;
+    box-shadow: 0 2px 8px rgba(233,30,140,0.35);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  #thicknessSlider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  #thicknessCircle {
+    background: var(--accent);
+    border-radius: 50%;
+    opacity: 0.85;
+    flex-shrink: 0;
+    transition: width 0.12s, height 0.12s;
+  }
+
+  /* ── Loading overlay ── */
+  #loadingOverlay {
+    position: fixed;
+    inset: 0;
+    background: var(--pink-bg);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+  }
+  #loadingOverlay h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  #loadingOverlay p {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    color: #a06080;
+    letter-spacing: 1px;
+  }
+  .spinner {
+    width: 42px; height: 42px;
+    border: 3.5px solid var(--pink-mid);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Loading screen -->
+<div id="loadingOverlay">
+  <h1>✋ GestureCanvas <small style="font-size:0.5em;font-weight:400;opacity:0.6;">by Aaryansh</small></h1>
+  <div class="spinner"></div>
+  <p>Loading MediaPipe Hands…</p>
+</div>
+
+<!-- Live webcam feed (background) -->
+<video id="webcam" autoplay playsinline muted></video>
+
+<!-- Main canvas for landmarks + drawing -->
+<canvas id="overlayCanvas"></canvas>
+
+<!-- Top bar -->
+<div id="topbar">
+  <div class="brand">✋ <span>Gesture</span>Canvas <small style="font-size:0.55em;font-weight:400;opacity:0.6;letter-spacing:0;">by Aaryansh</small></div>
+  <div id="modeDisplay" class="stop">● STOP</div>
+  <div id="colorDisplay">
+    <div id="colorSwatch" style="background:#e91e8c;"></div>
+    <span id="colorLabel">PINK</span>
+  </div>
+  <div class="btn-group">
+    <button class="btn" onclick="clearCanvas()">🗑 Clear</button>
+    <button class="btn" onclick="saveCanvas()">💾 Save</button>
+  </div>
+</div>
+
+<!-- Info panel -->
+<div id="infoPanel">
+  <h3>✦ Gesture Guide</h3>
+  <div class="guide-item">
+    <span class="icon">☝️</span>
+    <span class="desc">Index only → <strong>Draw</strong></span>
+  </div>
+  <div class="guide-item">
+    <span class="icon">✋</span>
+    <span class="desc">Open hand → <strong>Erase</strong></span>
+  </div>
+  <div class="guide-item">
+    <span class="icon">✊</span>
+    <span class="desc">Fist / other → <strong>Stop</strong></span>
+  </div>
+  <div class="divider"></div>
+  <div class="guide-item">
+    <span class="icon">🤚</span>
+    <span class="desc"><strong>2 hands only</strong><br/>Left hand fingers → <strong>Color</strong><br/>
+      1=Red · 2=Blue<br/>3=Green · 4=Black
+    </span>
+  </div>
+  <div class="divider"></div>
+  <div class="guide-item">
+    <span class="icon">🎚️</span>
+    <span class="desc">Slider at bottom → <strong>Thickness</strong></span>
+  </div>
+</div>
+
+<!-- Thickness slider -->
+<div id="thicknessWrap">
+  <span id="thicknessLabel">SIZE: 4px</span>
+  <input type="range" id="thicknessSlider" min="1" max="35" value="4"
+    oninput="onThicknessChange(this.value)" />
+  <div id="thicknessCircle" style="width:10px;height:10px;"></div>
+</div>
+
+<!-- MediaPipe Hands CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+/* ════════════════════════════════════════════
+   GestureCanvas by Aaryansh — Hand Gesture Drawing App
+   ════════════════════════════════════════════ */
+
+// ── DOM references ──
+const video   = document.getElementById('webcam');
+const canvas  = document.getElementById('overlayCanvas');
+const ctx     = canvas.getContext('2d');
+
+// ── Separate off-screen drawing canvas ──
+// The drawing layer is kept separate so we can composite
+// landmarks on top without erasing strokes every frame.
+const drawCanvas = document.createElement('canvas');
+const dCtx       = drawCanvas.getContext('2d');
+
+// ── State ──
+let drawColor       = '#e91e8c'; // current pen color
+let drawThickness   = 4;         // pen thickness (px) — set by slider
+let isDrawing     = false;       // currently in drawing stroke
+let prevX = null, prevY = null;  // last pen position
+let currentMode   = 'STOP';      // DRAW | ERASE | STOP
+let latestResults = null;        // most recent MediaPipe results
+
+// ── Color map for left-hand finger count ──
+const colorMap = {
+  1: { hex: '#e53935', name: 'RED'   },
+  2: { hex: '#1e88e5', name: 'BLUE'  },
+  3: { hex: '#43a047', name: 'GREEN' },
+  4: { hex: '#212121', name: 'BLACK' },
+};
+
+// ── MediaPipe hand landmark indices ──
+const LANDMARK = {
+  WRIST: 0,
+  THUMB_CMC:2, THUMB_MCP:3, THUMB_IP:4, THUMB_TIP:4,
+  INDEX_MCP:5, INDEX_PIP:6, INDEX_DIP:7, INDEX_TIP:8,
+  MIDDLE_MCP:9, MIDDLE_PIP:10, MIDDLE_DIP:11, MIDDLE_TIP:12,
+  RING_MCP:13, RING_PIP:14, RING_DIP:15, RING_TIP:16,
+  PINKY_MCP:17, PINKY_PIP:18, PINKY_DIP:19, PINKY_TIP:20,
+};
+
+// Pairs of landmark indices that form the hand skeleton
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // thumb
+  [0,5],[5,6],[6,7],[7,8],       // index
+  [0,9],[9,10],[10,11],[11,12],  // middle
+  [0,13],[13,14],[14,15],[15,16],// ring
+  [0,17],[17,18],[18,19],[19,20],// pinky
+  [5,9],[9,13],[13,17],          // palm
+];
+
+/* ════════════════════════
+   Resize canvas to window
+   ════════════════════════ */
+function resizeCanvases() {
+  const w = window.innerWidth, h = window.innerHeight;
+  canvas.width      = w; canvas.height      = h;
+  drawCanvas.width  = w; drawCanvas.height  = h;
+}
+resizeCanvases();
+window.addEventListener('resize', resizeCanvases);
+
+/* ════════════════════════════════
+   Finger-open detection helper
+   A finger is "open" when its tip
+   Y is above its PIP joint Y.
+   (Canvas Y axis: 0 = top)
+   ════════════════════════════════ */
+function isFingerOpen(lm, tipIdx, pipIdx) {
+  return lm[tipIdx].y < lm[pipIdx].y;
+}
+
+/* Count open fingers for a single hand (excludes thumb) */
+function countOpenFingers(lm) {
+  let count = 0;
+  // index, middle, ring, pinky
+  if (isFingerOpen(lm, 8,  6))  count++;
+  if (isFingerOpen(lm, 12, 10)) count++;
+  if (isFingerOpen(lm, 16, 14)) count++;
+  if (isFingerOpen(lm, 20, 18)) count++;
+  return count;
+}
+
+/* True when ONLY the index finger is open */
+function isIndexOnly(lm) {
+  return  isFingerOpen(lm, 8,  6)  &&  // index open
+         !isFingerOpen(lm, 12, 10) &&  // middle closed
+         !isFingerOpen(lm, 16, 14) &&  // ring closed
+         !isFingerOpen(lm, 20, 18);    // pinky closed
+}
+
+/* True when all four fingers are open (open hand = erase) */
+function isOpenHand(lm) {
+  return isFingerOpen(lm, 8,  6)  &&
+         isFingerOpen(lm, 12, 10) &&
+         isFingerOpen(lm, 16, 14) &&
+         isFingerOpen(lm, 20, 18);
+}
+
+/* Euclidean distance between two landmarks (normalised 0-1) */
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/* ════════════════════════════════════════════════
+   Manual thickness — controlled by slider, not hand
+   ════════════════════════════════════════════════ */
+function onThicknessChange(val) {
+  drawThickness = parseInt(val);
+  const size = Math.max(6, Math.min(40, drawThickness * 2));
+  const circle = document.getElementById('thicknessCircle');
+  circle.style.width  = size + 'px';
+  circle.style.height = size + 'px';
+  document.getElementById('thicknessLabel').textContent = 'SIZE: ' + drawThickness + 'px';
+}
+
+/* ════════════════════════════════════════════════
+   Convert normalised landmark coords → canvas px
+   MediaPipe X is flipped (mirrored feed), so we
+   flip X: canvasX = (1 - lm.x) * width
+   ════════════════════════════════════════════════ */
+function lmToCanvas(lm) {
+  return {
+    x: (1 - lm.x) * canvas.width,
+    y: lm.y * canvas.height,
+  };
+}
+
+/* ════════════════════════════════════
+   Draw full hand skeleton on overlay
+   ════════════════════════════════════ */
+function drawSkeleton(lm, handedness) {
+  const color = handedness === 'Left' ? 'rgba(255,120,180,0.85)' : 'rgba(120,200,255,0.85)';
+
+  // Connecting lines
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.lineJoin = 'round';
+  for (const [a, b] of CONNECTIONS) {
+    const pa = lmToCanvas(lm[a]);
+    const pb = lmToCanvas(lm[b]);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  }
+
+  // Landmark dots
+  for (let i = 0; i < lm.length; i++) {
+    const p = lmToCanvas(lm[i]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, i === 8 ? 7 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = i === 8 ? '#fff' : color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/* ════════════════════
+   UI helpers
+   ════════════════════ */
+function setMode(mode) {
+  currentMode = mode;
+  const el = document.getElementById('modeDisplay');
+  el.className = '';
+  if (mode === 'DRAW')  { el.className = 'draw';  el.textContent = '● DRAW';  }
+  if (mode === 'ERASE') { el.className = 'erase'; el.textContent = '● ERASE'; }
+  if (mode === 'STOP')  { el.className = 'stop';  el.textContent = '● STOP';  }
+}
+
+function setColor(hex, name) {
+  drawColor = hex;
+  document.getElementById('colorSwatch').style.background = hex;
+  document.getElementById('colorLabel').textContent = name;
+}
+
+/* ════════════════════
+   Clear / Save canvas
+   ════════════════════ */
+function clearCanvas() {
+  dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  isDrawing = false;
+  prevX = null; prevY = null;
+}
+
+function saveCanvas() {
+  // Composite: pink bg + drawing layer
+  const tmp = document.createElement('canvas');
+  tmp.width  = canvas.width;
+  tmp.height = canvas.height;
+  const tCtx = tmp.getContext('2d');
+  tCtx.fillStyle = '#fce4ec';
+  tCtx.fillRect(0, 0, tmp.width, tmp.height);
+  tCtx.drawImage(drawCanvas, 0, 0);
+  const link = document.createElement('a');
+  link.download = 'gesture-drawing.png';
+  link.href = tmp.toDataURL();
+  link.click();
+}
+
+/* ════════════════════════════════════════════════════
+   MediaPipe result callback — called every video frame
+   ════════════════════════════════════════════════════ */
+function onResults(results) {
+  latestResults = results;
+}
+
+/* ════════════════════════════════════════════════════
+   Main render loop using requestAnimationFrame
+   ════════════════════════════════════════════════════ */
+function renderLoop() {
+  requestAnimationFrame(renderLoop);
+
+  // Clear overlay canvas each frame
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw the persistent drawing layer underneath the skeleton
+  ctx.drawImage(drawCanvas, 0, 0);
+
+  if (!latestResults || !latestResults.multiHandLandmarks) {
+    setMode('STOP');
+    isDrawing = false;
+    prevX = null; prevY = null;
+    return;
+  }
+
+  const hands      = latestResults.multiHandLandmarks;
+  const handedness = latestResults.multiHandedness;
+
+  if (hands.length === 0) {
+    setMode('STOP');
+    isDrawing = false;
+    prevX = null; prevY = null;
+    return;
+  }
+
+  /* ── NOTE on MediaPipe handedness + mirroring ──────────────────────────
+     The webcam feed is CSS-mirrored (scaleX(-1)), but MediaPipe processes
+     the RAW (un-mirrored) video. So MediaPipe's "Left" label corresponds
+     to the hand on the RIGHT side of the screen (your actual right hand),
+     and "Right" label = left side of screen (your actual left hand).
+     We correct for this by swapping: treat MediaPipe "Left" as draw hand
+     and MediaPipe "Right" as the color-change hand.
+     ─────────────────────────────────────────────────────────────────────── */
+
+  // Separate hands by MediaPipe label
+  let mpLeftHand  = null; // = your physical RIGHT hand (draw/erase/thickness)
+  let mpRightHand = null; // = your physical LEFT hand  (color change — only when 2 hands)
+  let mpLeftIdx   = -1;
+  let mpRightIdx  = -1;
+
+  for (let i = 0; i < hands.length; i++) {
+    if (handedness[i].label === 'Left') {
+      mpLeftHand = hands[i];
+      mpLeftIdx  = i;
+    } else {
+      mpRightHand = hands[i];
+      mpRightIdx  = i;
+    }
+  }
+
+  // ── STRICT TWO-HAND MODE: color change ONLY when BOTH hands visible ──
+  if (hands.length === 2 && mpLeftHand && mpRightHand) {
+
+    // Draw skeletons for both
+    drawSkeleton(mpLeftHand,  'Left');   // draw hand (right side of screen)
+    drawSkeleton(mpRightHand, 'Right');  // color hand (left side of screen)
+
+    // Color change: read finger count from the color-change hand (mpRightHand)
+    const count = countOpenFingers(mpRightHand);
+    if (colorMap[count]) {
+      setColor(colorMap[count].hex, colorMap[count].name);
+    }
+
+    // Drawing/erasing still active with draw hand (mpLeftHand) in 2-hand mode
+    const indexTip = mpLeftHand[8];
+    const tip      = lmToCanvas(indexTip);
+
+    if (isIndexOnly(mpLeftHand)) {
+      setMode('DRAW');
+      // Marker dot
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, drawThickness / 2 + 3, 0, Math.PI * 2);
+      ctx.fillStyle   = drawColor;
+      ctx.globalAlpha = 0.5;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // Stroke with glow
+      if (isDrawing && prevX !== null) {
+        dCtx.beginPath();
+        dCtx.moveTo(prevX, prevY);
+        const midX = (prevX + tip.x) / 2;
+        const midY = (prevY + tip.y) / 2;
+        dCtx.quadraticCurveTo(prevX, prevY, midX, midY);
+        dCtx.lineTo(tip.x, tip.y);
+        // Outer glow pass
+        dCtx.shadowColor = drawColor;
+        dCtx.shadowBlur  = drawThickness * 3 + 8;
+        dCtx.strokeStyle = drawColor;
+        dCtx.lineWidth   = drawThickness;
+        dCtx.lineCap     = 'round';
+        dCtx.lineJoin    = 'round';
+        dCtx.stroke();
+        // Bright white core pass
+        dCtx.shadowBlur  = drawThickness * 1.5;
+        dCtx.lineWidth   = drawThickness * 0.4;
+        dCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+        dCtx.stroke();
+        // Reset shadow
+        dCtx.shadowColor = 'transparent';
+        dCtx.shadowBlur  = 0;
+      }
+      isDrawing = true;
+      prevX = tip.x; prevY = tip.y;
+
+    } else if (isOpenHand(mpLeftHand)) {
+      setMode('ERASE');
+      const eraserR = drawThickness * 4 + 18;
+      dCtx.save();
+      dCtx.globalCompositeOperation = 'destination-out';
+      dCtx.beginPath();
+      dCtx.arc(tip.x, tip.y, eraserR, 0, Math.PI * 2);
+      dCtx.fillStyle = 'rgba(0,0,0,1)';
+      dCtx.fill();
+      dCtx.restore();
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, eraserR, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,80,0,0.7)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      isDrawing = false; prevX = null; prevY = null;
+
+    } else {
+      setMode('STOP');
+      isDrawing = false; prevX = null; prevY = null;
+    }
+
+    return; // done for 2-hand frame
+  }
+
+  // ── SINGLE HAND MODE ──
+  // Color NEVER changes with one hand. Drawing/thickness work normally.
+  // Use whichever single hand is visible as the draw hand.
+  const drawHand   = hands[0];
+  const drawLabel  = handedness[0].label;
+
+  // Draw skeleton
+  drawSkeleton(drawHand, drawLabel);
+
+  /* ── Index fingertip canvas position ── */
+  const indexTip = drawHand[8];
+  const tip      = lmToCanvas(indexTip);
+
+  /* ── Determine gesture mode ── */
+  if (isIndexOnly(drawHand)) {
+    /* ── DRAW MODE ── */
+    setMode('DRAW');
+
+    // Marker dot at fingertip
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, drawThickness / 2 + 3, 0, Math.PI * 2);
+    ctx.fillStyle   = drawColor;
+    ctx.globalAlpha = 0.5;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if (isDrawing && prevX !== null) {
+      dCtx.beginPath();
+      dCtx.moveTo(prevX, prevY);
+      const midX = (prevX + tip.x) / 2;
+      const midY = (prevY + tip.y) / 2;
+      dCtx.quadraticCurveTo(prevX, prevY, midX, midY);
+      dCtx.lineTo(tip.x, tip.y);
+      // Outer glow pass
+      dCtx.shadowColor = drawColor;
+      dCtx.shadowBlur  = drawThickness * 3 + 8;
+      dCtx.strokeStyle = drawColor;
+      dCtx.lineWidth   = drawThickness;
+      dCtx.lineCap     = 'round';
+      dCtx.lineJoin    = 'round';
+      dCtx.stroke();
+      // Bright white core pass
+      dCtx.shadowBlur  = drawThickness * 1.5;
+      dCtx.lineWidth   = drawThickness * 0.4;
+      dCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+      dCtx.stroke();
+      // Reset shadow
+      dCtx.shadowColor = 'transparent';
+      dCtx.shadowBlur  = 0;
+    }
+    isDrawing = true;
+    prevX = tip.x; prevY = tip.y;
+
+  } else if (isOpenHand(drawHand)) {
+    /* ── ERASE MODE ── */
+    setMode('ERASE');
+
+    const eraserR = drawThickness * 4 + 18;
+    dCtx.save();
+    dCtx.globalCompositeOperation = 'destination-out';
+    dCtx.beginPath();
+    dCtx.arc(tip.x, tip.y, eraserR, 0, Math.PI * 2);
+    dCtx.fillStyle = 'rgba(0,0,0,1)';
+    dCtx.fill();
+    dCtx.restore();
+
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, eraserR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,80,0,0.7)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    isDrawing = false;
+    prevX = null; prevY = null;
+
+  } else {
+    /* ── STOP ── */
+    setMode('STOP');
+    isDrawing = false;
+    prevX = null; prevY = null;
+  }
+}
+
+/* ════════════════════════════════════
+   Initialise MediaPipe Hands + Camera
+   ════════════════════════════════════ */
+async function init() {
+  const hands = new Hands({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6,
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await hands.send({ image: video });
+    },
+    width: 1280,
+    height: 720,
+  });
+
+  await camera.start();
+
+  // Hide loading overlay
+  document.getElementById('loadingOverlay').style.display = 'none';
+
+  // Start render loop
+  renderLoop();
+}
+
+init().catch(err => {
+  document.querySelector('#loadingOverlay p').textContent =
+    '⚠ Error: ' + err.message;
+});
+</script>
+<!-- Credit -->
+<div style="
+  position:fixed;
+  bottom:18px;
+  right:24px;
+  z-index:10;
+  font-family:'DM Mono',monospace;
+  font-size:0.68rem;
+  letter-spacing:1px;
+  color:#f48fb1;
+  opacity:0.9;
+  pointer-events:none;
+  user-select:none;
+  text-shadow:
+    0 0 6px #e91e8c,
+    0 0 12px #e91e8c,
+    0 0 24px #e91e8caa;
+  animation: glowPulse 2.5s ease-in-out infinite;
+">Made by Aaryansh</div>
+
+<style>
+@keyframes glowPulse {
+  0%, 100% { text-shadow: 0 0 6px #e91e8c, 0 0 12px #e91e8c, 0 0 24px #e91e8caa; opacity: 0.9; }
+  50%       { text-shadow: 0 0 10px #e91e8c, 0 0 22px #e91e8c, 0 0 40px #e91e8c; opacity: 1; }
+}
+</style>
+
+</body>
+</html>
